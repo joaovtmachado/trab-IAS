@@ -1,37 +1,31 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torchvision.models as models
+from torchvision.models import ResNet50_Weights
 
-class SimpleCNN(nn.Module):
-    def __init__(self):
-        super(SimpleCNN, self).__init__()
-        # Imagem de entrada: 3 canais (RGB), 224x224 pixels
-        # Camada 1: Extrai 16 mapas de características
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+# Pode manter a sua classe SimpleCNN aqui em cima...
+
+class ResNet50Transfer(nn.Module):
+    def __init__(self, num_classes=2, freeze_features=True):
+        super(ResNet50Transfer, self).__init__()
         
-        # Camada 2: Extrai 32 mapas de características
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        # 1. Carrega a ResNet50 com os pesos oficiais pré-treinados no ImageNet
+        self.resnet = models.resnet50(weights=ResNet50_Weights.DEFAULT)
         
-        # Camada 3: Extrai 64 mapas de características
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+        # 2. Congelamento de Camadas (Conceito usado no seu projeto de referência)
+        # Se freeze_features for True, nós "trancamos" os pesos das convoluções. 
+        # Isso faz o modelo treinar MUITO mais rápido, pois a GPU só vai calibrar a última camada.
+        if freeze_features:
+            for param in self.resnet.parameters():
+                param.requires_grad = False
+                
+        # 3. Adaptar o Classificador Final
+        # A ResNet50 original termina em uma camada chamada 'fc' que tem 2048 neurônios de entrada
+        num_features = self.resnet.fc.in_features
         
-        # Como passamos pelo MaxPooling 3 vezes (reduz pela metade cada vez):
-        # 224 -> 112 -> 56 -> 28. O tamanho final da imagem achatada será 64 canais * 28 * 28
-        self.fc1 = nn.Linear(64 * 28 * 28, 512)
-        
-        # Camada de saída final: 2 classes (0: Benigno, 1: Maligno)
-        self.fc2 = nn.Linear(512, 2)
+        # Substituímos a camada final por uma nova camada Linear adaptada para o seu número de classes (2)
+        self.resnet.fc = nn.Linear(num_features, num_classes)
 
     def forward(self, x):
-        # Passa pela convolução, aplica a função de ativação ReLU e diminui o tamanho com Pooling
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = self.pool(F.relu(self.conv3(x)))
-        
-        # "Achata" os mapas de características para passar para os neurônios tradicionais (Linear)
-        x = x.view(-1, 64 * 28 * 28)
-        
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x) # Sem ativação final aqui porque usaremos a CrossEntropyLoss depois
-        return x
+        # Passa a imagem diretamente pela ResNet modificada
+        return self.resnet(x)

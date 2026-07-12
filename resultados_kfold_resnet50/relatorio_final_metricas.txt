@@ -1,0 +1,22 @@
+##################################################
+ RELATÓRIO COMPLETO DE VALIDAÇÃO CRUZADA - PASTA: resultados_kfold_resnet50
+##################################################
+
+Acurácia Geral:   0.8759
+Sensibilidade (Recall): 0.9506
+Especificidade:         0.7125
+F1-Score (Macro):       0.8479
+
+MATRIZ DE CONFUSÃO:
+[[1502  606]
+ [ 228 4386]]
+
+RELATÓRIO DETALHADO POR CLASSE:
+              precision    recall  f1-score   support
+
+     Benigno       0.87      0.71      0.78      2108
+     Maligno       0.88      0.95      0.91      4614
+
+    accuracy                           0.88      6722
+   macro avg       0.87      0.83      0.85      6722
+weighted avg       0.88      0.88      0.87      6722
