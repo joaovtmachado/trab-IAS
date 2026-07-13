@@ -26,3 +26,5 @@ Thumbs.db
 *.pth
 __pycache__/
 .ipynb_checkpoints/
+
+*.pdf

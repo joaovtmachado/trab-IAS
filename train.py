@@ -1,176 +1,265 @@
+import os
+import random
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Subset
-from sklearn.model_selection import train_test_split, StratifiedKFold
-import numpy as np
-import os
 import torchvision.transforms as transforms
+from torch.utils.data import DataLoader, Subset
+from sklearn.model_selection import train_test_split, StratifiedGroupKFold
 
-# Importações dos seus arquivos locais do projeto
 from dataset import BreaKHisDataset
-from cross_validation_metrics import get_cross_validation_metrics
+from cross_validation_metrics import calcular_metricas, get_cross_validation_metrics
 
-# =========================================================================
-# CONFIGURAÇÃO DO EXPERIMENTO
-# =========================================================================
-# Escolha qual modelo treinar neste experimento: 'resnet50', 'vgg16' ou 'mobilenet'
-MODELO_SELECIONADO = 'mobilenet'  
-DATA_DIR = "./BreaKHis_v1" 
-NUM_EPOCHS = 10  # Pode aumentar para 30 ou 50 para os resultados finais do artigo
-# =========================================================================
+MODELO_SELECIONADO = "resnet50"
+DATA_DIR = "./BreaKHis_v1"
+NUM_EPOCHS = 25
+N_SPLITS = 5
+TEST_SIZE_PACIENTES = 0.15
+PATIENCE = 3
+BATCH_SIZE = 32
+LEARNING_RATE = 0.0001
+SEED = 42
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
 
 def carregar_modelo(nome_modelo, device):
-    """Função auxiliar para instanciar o modelo escolhido dinamicamente."""
-    if nome_modelo == 'resnet50':
+    if nome_modelo == "resnet50":
         from model import ResNet50Transfer
         print("-> Instanciando ResNet50 com Transfer Learning...")
         return ResNet50Transfer(num_classes=2, freeze_features=True).to(device)
-        
-    elif nome_modelo == 'vgg16':
+    elif nome_modelo == "vgg16":
         from vggnet import VGGNetTransfer
         print("-> Instanciando VGG16 com Transfer Learning...")
         return VGGNetTransfer(num_classes=2, freeze_features=True).to(device)
-        
-    elif nome_modelo == 'mobilenet':
+    elif nome_modelo == "mobilenet":
         from mobilenet import MobileNetTransfer
         print("-> Instanciando MobileNet com Transfer Learning...")
         return MobileNetTransfer(num_classes=2, freeze_features=True).to(device)
     else:
-        raise ValueError(f"Modelo {nome_modelo} não reconhecido. Escolha entre 'resnet50', 'vgg16' ou 'mobilenet'.")
+        raise ValueError(f"Modelo {nome_modelo} nao reconhecido.")
+
+
+def pesos_de_classe(labels_treino, device):
+    contagem = np.bincount(labels_treino, minlength=2).astype(np.float64)
+    contagem[contagem == 0] = 1.0
+    pesos = len(labels_treino) / (2.0 * contagem)
+    return torch.tensor(pesos, dtype=torch.float).to(device)
+
+
+def split_por_paciente(patients, labels):
+    pacientes_unicos = np.array(sorted(set(patients)))
+    rotulo_por_paciente = np.array(
+        [labels[np.where(patients == p)[0][0]] for p in pacientes_unicos]
+    )
+    pac_treinoval, pac_teste = train_test_split(
+        pacientes_unicos,
+        test_size=TEST_SIZE_PACIENTES,
+        stratify=rotulo_por_paciente,
+        random_state=SEED,
+    )
+    conjunto_teste = set(pac_teste)
+    idx_teste = np.array([i for i, p in enumerate(patients) if p in conjunto_teste])
+    idx_treinoval = np.array(
+        [i for i, p in enumerate(patients) if p not in conjunto_teste]
+    )
+    return idx_treinoval, idx_teste
+
+
+def avaliar(model, loader, device, criterion):
+    model.eval()
+    perda_total = 0.0
+    reais, preds, probs, mags = [], [], [], []
+    with torch.no_grad():
+        for images, labels_batch, mags_batch in loader:
+            images = images.to(device)
+            labels_dev = labels_batch.to(device)
+            outputs = model(images)
+            perda_total += criterion(outputs, labels_dev).item() * images.size(0)
+            prob_maligno = torch.softmax(outputs, 1)[:, 1]
+            _, predicao = torch.max(outputs, 1)
+            reais.extend(labels_batch.numpy())
+            preds.extend(predicao.cpu().numpy())
+            probs.extend(prob_maligno.cpu().numpy())
+            mags.extend(mags_batch.numpy())
+    perda_media = perda_total / len(loader.dataset)
+    return perda_media, reais, preds, probs, mags
+
+
+def treinar_um_fold(model, train_loader, val_loader, device, criterion, checkpoint_name):
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    melhor_val_loss = float("inf")
+    epocas_sem_melhora = 0
+
+    for epoch in range(NUM_EPOCHS):
+        model.train()
+        train_loss = 0.0
+        for images, labels_batch, _ in train_loader:
+            images, labels_batch = images.to(device), labels_batch.to(device)
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels_batch)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item() * images.size(0)
+        train_loss /= len(train_loader.dataset)
+
+        val_loss, reais, preds, _, _ = avaliar(model, val_loader, device, criterion)
+        val_acc = np.mean(np.array(reais) == np.array(preds))
+        print(
+            f"Epoca [{epoch + 1}/{NUM_EPOCHS}] | Train Loss: {train_loss:.4f} | "
+            f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}"
+        )
+
+        if val_loss < melhor_val_loss:
+            melhor_val_loss = val_loss
+            epocas_sem_melhora = 0
+            torch.save({"model_state_dict": model.state_dict(), "val_loss": val_loss}, checkpoint_name)
+        else:
+            epocas_sem_melhora += 1
+            if epocas_sem_melhora >= PATIENCE:
+                print(f"Early stopping na epoca {epoch + 1}.")
+                break
+
 
 def train_kfold():
+    set_seed(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Treinando no dispositivo: {device}")
-    print(f"Modelo selecionado para este pipeline: {MODELO_SELECIONADO.upper()}\n")
+    print(f"Modelo selecionado: {MODELO_SELECIONADO.upper()}\n")
 
-    # 2. Definição das Transformações de Imagem (Data Augmentation Agressivo no Treino)
     transform_train = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.2),
+        transforms.RandomVerticalFlip(p=0.5),
+        transforms.RandomRotation(degrees=180),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
-
     transform_eval = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
-    dataset_completo_treino = BreaKHisDataset(DATA_DIR, transform=transform_train)
-    dataset_completo_eval = BreaKHisDataset(DATA_DIR, transform=transform_eval)
+    dataset_treino = BreaKHisDataset(DATA_DIR, transform=transform_train)
+    dataset_eval = BreaKHisDataset(DATA_DIR, transform=transform_eval)
 
-    indices = np.arange(len(dataset_completo_treino))
-    labels = np.array(dataset_completo_treino.labels)
+    labels = np.array(dataset_treino.labels)
+    patients = np.array(dataset_treino.patients)
 
-    # FASE A: Isolar o Teste Final (15%)
-    idx_treino_val, idx_teste, y_treino_val, y_teste = train_test_split(
-        indices, labels, test_size=0.15, stratify=labels, random_state=42
+    idx_treinoval, idx_teste = split_por_paciente(patients, labels)
+    y_treinoval = labels[idx_treinoval]
+    grupos_treinoval = patients[idx_treinoval]
+
+    print(f"Imagens treino+val: {len(idx_treinoval)} | Imagens teste: {len(idx_teste)}")
+    print(f"Pacientes treino+val: {len(set(grupos_treinoval))} | "
+          f"Pacientes teste: {len(set(patients[idx_teste]))}")
+    assert set(grupos_treinoval).isdisjoint(set(patients[idx_teste]))
+
+    gerador = torch.Generator()
+    gerador.manual_seed(SEED)
+
+    test_loader = DataLoader(
+        Subset(dataset_eval, idx_teste), batch_size=BATCH_SIZE, shuffle=False,
+        pin_memory=True, num_workers=2, worker_init_fn=seed_worker,
     )
 
-    # FASE B: Configurar a Validação Cruzada (5 Folds)
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    
-    todas_labels_reais = []
-    todas_predicoes = []
-    
-    for fold, (train_idx, val_idx) in enumerate(skf.split(idx_treino_val, y_treino_val)):
-        print(f"\n" + "="*20 + f" FOLD {fold + 1} / 5 ({MODELO_SELECIONADO.upper()}) " + "="*20)
-        
-        global_train_idx = idx_treino_val[train_idx]
-        global_val_idx = idx_treino_val[val_idx]
-        
-        subset_treino = Subset(dataset_completo_treino, global_train_idx)
-        subset_val = Subset(dataset_completo_eval, global_val_idx)
-        
-        train_loader = DataLoader(subset_treino, batch_size=32, shuffle=True, pin_memory=True)
-        val_loader = DataLoader(subset_val, batch_size=32, shuffle=False, pin_memory=True)
-        
-        # Chamada dinâmica do modelo configurado
-        model = carregar_modelo(MODELO_SELECIONADO, device)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.0001)
-        
-        best_val_acc = 0.0
-        # O nome do checkpoint agora protege os resultados para não sobrescrever outros modelos
-        checkpoint_name = f'best_checkpoint_{MODELO_SELECIONADO}_fold_{fold + 1}.pth'
-        
-        for epoch in range(NUM_EPOCHS):
-            # TREINAMENTO
-            model.train()
-            train_loss = 0.0
-            for images, labels_batch, _ in train_loader:
-                images, labels_batch = images.to(device), labels_batch.to(device)
-                
-                optimizer.zero_grad()
-                outputs = model(images)
-                loss = criterion(outputs, labels_batch)
-                loss.backward()
-                optimizer.step()
-                
-                train_loss += loss.item() * images.size(0)
-            train_loss /= len(train_loader.dataset)
-            
-            # VALIDAÇÃO
-            model.eval()
-            val_loss = 0.0
-            corrects = 0
-            with torch.no_grad():
-                for images, labels_batch, _ in val_loader:
-                    images, labels_batch = images.to(device), labels_batch.to(device)
-                    
-                    outputs = model(images)
-                    loss = criterion(outputs, labels_batch)
-                    val_loss += loss.item() * images.size(0)
-                    
-                    _, preds = torch.max(outputs, 1)
-                    corrects += torch.sum(preds == labels_batch.data)
-                    
-            val_loss /= len(val_loader.dataset)
-            val_acc = corrects.double() / len(val_loader.dataset)
-            
-            print(f"Época [{epoch+1}/{NUM_EPOCHS}] | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
-            
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
-                print(f" Nova melhor acurácia no Fold {fold + 1} ({best_val_acc:.4f})! Salvando...")
-                torch.save({
-                    'fold': fold + 1,
-                    'epoch': epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'loss': val_loss,
-                    'val_acc': best_val_acc.item()
-                }, checkpoint_name)
-                
-        print(f"Acurácia final máxima no Fold {fold + 1}: {best_val_acc:.4f}")
-        
-        # COMPILAÇÃO DE RESULTADOS DO FOLD
-        print(f"Armazenando predições do Fold {fold + 1}...")
-        checkpoint = torch.load(checkpoint_name)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.eval()
-        
-        with torch.no_grad():
-            for images, labels_batch, _ in val_loader:
-                images = images.to(device)
-                outputs = model(images)
-                _, preds = torch.max(outputs, 1)
-                
-                todas_labels_reais.extend(labels_batch.cpu().numpy())
-                todas_predicoes.extend(preds.cpu().numpy())
+    skf = StratifiedGroupKFold(n_splits=N_SPLITS, shuffle=True, random_state=SEED)
 
-    # FASE C: GERAÇÃO DO RELATÓRIO GLOBAL ISOLADO POR MODELO
-    print(f"\nTreinamento de {MODELO_SELECIONADO.upper()} concluído! Gerando métricas...")
+    reais_cv, preds_cv, probs_cv, mags_cv = [], [], [], []
+    metricas_por_fold = []
+
+    for fold, (train_idx, val_idx) in enumerate(
+        skf.split(idx_treinoval, y_treinoval, groups=grupos_treinoval)
+    ):
+        print("\n" + "=" * 20 + f" FOLD {fold + 1}/{N_SPLITS} ({MODELO_SELECIONADO.upper()}) " + "=" * 20)
+
+        global_train_idx = idx_treinoval[train_idx]
+        global_val_idx = idx_treinoval[val_idx]
+
+        pac_train = set(patients[global_train_idx])
+        pac_val = set(patients[global_val_idx])
+        print(f"Pacientes treino: {len(pac_train)} | Pacientes val: {len(pac_val)}")
+        assert pac_train.isdisjoint(pac_val)
+
+        train_loader = DataLoader(
+            Subset(dataset_treino, global_train_idx), batch_size=BATCH_SIZE, shuffle=True,
+            pin_memory=True, num_workers=2, worker_init_fn=seed_worker, generator=gerador,
+        )
+        val_loader = DataLoader(
+            Subset(dataset_eval, global_val_idx), batch_size=BATCH_SIZE, shuffle=False,
+            pin_memory=True, num_workers=2, worker_init_fn=seed_worker,
+        )
+
+        criterion = nn.CrossEntropyLoss(weight=pesos_de_classe(labels[global_train_idx], device))
+        model = carregar_modelo(MODELO_SELECIONADO, device)
+        checkpoint_name = f"best_checkpoint_{MODELO_SELECIONADO}_fold_{fold + 1}.pth"
+
+        treinar_um_fold(model, train_loader, val_loader, device, criterion, checkpoint_name)
+
+        checkpoint = torch.load(checkpoint_name)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        _, reais, preds, probs, mags = avaliar(model, val_loader, device, criterion)
+
+        metricas_por_fold.append(calcular_metricas(reais, preds, probs))
+        reais_cv.extend(reais)
+        preds_cv.extend(preds)
+        probs_cv.extend(probs)
+        mags_cv.extend(mags)
+
+    print(f"\nCV concluida para {MODELO_SELECIONADO.upper()}. Gerando metricas...")
     get_cross_validation_metrics(
-        reais=todas_labels_reais, 
-        predicoes=todas_predicoes, 
-        nomes_classes=['Benigno', 'Maligno'],
-        pasta_saida=f"resultados_kfold_{MODELO_SELECIONADO}"
+        reais=reais_cv,
+        predicoes=preds_cv,
+        probabilidades=probs_cv,
+        magnificacoes=mags_cv,
+        metricas_por_fold=metricas_por_fold,
+        nomes_classes=["Benigno", "Maligno"],
+        pasta_saida=f"resultados_kfold_{MODELO_SELECIONADO}",
+        titulo=f"Validacao Cruzada - {MODELO_SELECIONADO.upper()}",
+    )
+
+    print("\nAvaliando no conjunto de teste (ensemble dos folds)...")
+    criterion_teste = nn.CrossEntropyLoss()
+    prob_acumulada = None
+    y_teste, mags_teste = None, None
+    for fold in range(N_SPLITS):
+        checkpoint_name = f"best_checkpoint_{MODELO_SELECIONADO}_fold_{fold + 1}.pth"
+        model = carregar_modelo(MODELO_SELECIONADO, device)
+        model.load_state_dict(torch.load(checkpoint_name)["model_state_dict"])
+        _, reais, _, probs, mags = avaliar(model, test_loader, device, criterion_teste)
+        probs = np.array(probs)
+        prob_acumulada = probs if prob_acumulada is None else prob_acumulada + probs
+        y_teste, mags_teste = reais, mags
+
+    prob_media = prob_acumulada / N_SPLITS
+    preds_teste = (prob_media >= 0.5).astype(int)
+    get_cross_validation_metrics(
+        reais=y_teste,
+        predicoes=preds_teste,
+        probabilidades=prob_media,
+        magnificacoes=mags_teste,
+        nomes_classes=["Benigno", "Maligno"],
+        pasta_saida=f"resultados_teste_{MODELO_SELECIONADO}",
+        titulo=f"Teste Held-out - {MODELO_SELECIONADO.upper()}",
     )
     print("Pipeline finalizado com sucesso!")
+
 
 if __name__ == "__main__":
     train_kfold()
