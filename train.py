@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split, StratifiedGroupKFold
 from dataset import BreaKHisDataset
 from cross_validation_metrics import calcular_metricas, get_cross_validation_metrics
 
-MODELO_SELECIONADO = "resnet50"
+MODELO_SELECIONADO = "vgg16"
 DATA_DIR = "./BreaKHis_v1"
 NUM_EPOCHS = 25
 N_SPLITS = 5
@@ -40,15 +40,12 @@ def seed_worker(worker_id):
 def carregar_modelo(nome_modelo, device):
     if nome_modelo == "resnet50":
         from model import ResNet50Transfer
-        print("-> Instanciando ResNet50 com Transfer Learning...")
         return ResNet50Transfer(num_classes=2, freeze_features=True).to(device)
     elif nome_modelo == "vgg16":
         from vggnet import VGGNetTransfer
-        print("-> Instanciando VGG16 com Transfer Learning...")
         return VGGNetTransfer(num_classes=2, freeze_features=True).to(device)
     elif nome_modelo == "mobilenet":
         from mobilenet import MobileNetTransfer
-        print("-> Instanciando MobileNet com Transfer Learning...")
         return MobileNetTransfer(num_classes=2, freeze_features=True).to(device)
     else:
         raise ValueError(f"Modelo {nome_modelo} nao reconhecido.")
@@ -121,8 +118,8 @@ def treinar_um_fold(model, train_loader, val_loader, device, criterion, checkpoi
         val_loss, reais, preds, _, _ = avaliar(model, val_loader, device, criterion)
         val_acc = np.mean(np.array(reais) == np.array(preds))
         print(
-            f"Epoca [{epoch + 1}/{NUM_EPOCHS}] | Train Loss: {train_loss:.4f} | "
-            f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}"
+            f"Epoca {epoch + 1} de {NUM_EPOCHS}; Train Loss: {train_loss:.4f}; "
+            f"Loss: {val_loss:.4f}; Acc: {val_acc:.4f}"
         )
 
         if val_loss < melhor_val_loss:
@@ -166,8 +163,8 @@ def train_kfold():
     y_treinoval = labels[idx_treinoval]
     grupos_treinoval = patients[idx_treinoval]
 
-    print(f"Imagens treino+val: {len(idx_treinoval)} | Imagens teste: {len(idx_teste)}")
-    print(f"Pacientes treino+val: {len(set(grupos_treinoval))} | "
+    print(f"Imagens treino+val: {len(idx_treinoval)}; Imagens teste: {len(idx_teste)}")
+    print(f"Pacientes treino+val: {len(set(grupos_treinoval))}; "
           f"Pacientes teste: {len(set(patients[idx_teste]))}")
     assert set(grupos_treinoval).isdisjoint(set(patients[idx_teste]))
 

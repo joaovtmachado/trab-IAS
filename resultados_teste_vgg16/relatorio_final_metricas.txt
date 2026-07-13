@@ -1,0 +1,27 @@
+ RELATORIO - Teste Held-out - VGG16 - PASTA: resultados_teste_vgg16
+Acuracia Geral:   0.8381
+Sensibilidade (Recall Maligno): 0.9006
+Especificidade (Recall Benigno): 0.7500
+F1-Score (Macro):       0.8302
+AUC-ROC:                0.8965
+
+MATRIZ DE CONFUSAO:
+[[429 143]
+ [ 80 725]]
+
+              precision    recall  f1-score   support
+
+     Benigno       0.84      0.75      0.79       572
+     Maligno       0.84      0.90      0.87       805
+
+    accuracy                           0.84      1377
+   macro avg       0.84      0.83      0.83      1377
+weighted avg       0.84      0.84      0.84      1377
+
+
+ANALISE POR MAGNIFICACAO:
+   Mag       N   Acuracia    Sensib   Especif
+    40     347     0.8012    0.9031    0.6689
+   100     372     0.8683    0.9067    0.8095
+   200     348     0.8391    0.8696    0.7943
+   400     310     0.8419    0.9266    0.7293
