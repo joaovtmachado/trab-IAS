@@ -9,12 +9,10 @@ class MyResnet (nn.Module):
 
         self.features = nn.Sequential(*list(resnet.children())[:-1])
 
-        # freezing the convolution layers
         if freeze_conv:
             for param in self.features.parameters():
                 param.requires_grad = False
 
-        # Feature reducer
         if neurons_reducer_block > 0:
             self.reducer_block = nn.Sequential(
                 nn.Linear(n_feat_conv, neurons_reducer_block),
@@ -25,7 +23,6 @@ class MyResnet (nn.Module):
         else:
             self.reducer_block = None
 
-        # Here comes the extra information (if applicable)
         if neurons_reducer_block > 0:
             self.classifier = nn.Linear(neurons_reducer_block, num_class)
         else:
@@ -36,9 +33,9 @@ class MyResnet (nn.Module):
 
         x = self.features(img)
 
-        x = x.view(x.size(0), -1) # flatting
+        x = x.view(x.size(0), -1) 
         if self.reducer_block is not None:
-            x = self.reducer_block(x)  # feat reducer block
+            x = self.reducer_block(x)  
 
 
         return self.classifier(x)

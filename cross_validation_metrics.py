@@ -125,9 +125,7 @@ def get_cross_validation_metrics(
         np.array(reais), np.array(predicoes), target_names=nomes_classes
     )
 
-    print("\n" + "#" * 40)
-    print(f"      RELATORIO DE METRICAS - {titulo}")
-    print("#" * 40)
+    
     print(f"Acuracia Geral:   {m['acuracia']:.4f}")
     print(f"Sensibilidade:    {m['sensibilidade']:.4f} (Recall de Malignos)")
     print(f"Especificidade:   {m['especificidade']:.4f} (Recall de Benignos)")
@@ -154,9 +152,7 @@ def get_cross_validation_metrics(
 
     caminho_txt = os.path.join(pasta_saida, "relatorio_final_metricas.txt")
     with open(caminho_txt, "w", encoding="utf-8") as f:
-        f.write("#" * 50 + "\n")
         f.write(f" RELATORIO - {titulo} - PASTA: {pasta_saida}\n")
-        f.write("#" * 50 + "\n\n")
         f.write(f"Acuracia Geral:   {m['acuracia']:.4f}\n")
         f.write(f"Sensibilidade (Recall Maligno): {m['sensibilidade']:.4f}\n")
         f.write(f"Especificidade (Recall Benigno): {m['especificidade']:.4f}\n")
@@ -168,7 +164,6 @@ def get_cross_validation_metrics(
             f.write(_bloco_media_desvio(metricas_por_fold) + "\n\n")
         f.write("MATRIZ DE CONFUSAO:\n")
         f.write(np.array2string(m["cm"]) + "\n\n")
-        f.write("RELATORIO DETALHADO POR CLASSE:\n")
         f.write(report_texto + "\n\n")
         if magnificacoes is not None:
             f.write(_bloco_por_magnificacao(reais, predicoes, magnificacoes) + "\n")

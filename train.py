@@ -139,8 +139,8 @@ def treinar_um_fold(model, train_loader, val_loader, device, criterion, checkpoi
 def train_kfold():
     set_seed(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Treinando no dispositivo: {device}")
-    print(f"Modelo selecionado: {MODELO_SELECIONADO.upper()}\n")
+    
+    print(f"Modelo selecionado: {MODELO_SELECIONADO}\n")
 
     transform_train = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -187,7 +187,7 @@ def train_kfold():
     for fold, (train_idx, val_idx) in enumerate(
         skf.split(idx_treinoval, y_treinoval, groups=grupos_treinoval)
     ):
-        print("\n" + "=" * 20 + f" FOLD {fold + 1}/{N_SPLITS} ({MODELO_SELECIONADO.upper()}) " + "=" * 20)
+        print("\n" + f" FOLD {fold + 1}/{N_SPLITS} ({MODELO_SELECIONADO}) ")
 
         global_train_idx = idx_treinoval[train_idx]
         global_val_idx = idx_treinoval[val_idx]
@@ -222,7 +222,7 @@ def train_kfold():
         probs_cv.extend(probs)
         mags_cv.extend(mags)
 
-    print(f"\nCV concluida para {MODELO_SELECIONADO.upper()}. Gerando metricas...")
+    print(f"\nCV concluida para {MODELO_SELECIONADO}. Gerando metricas...")
     get_cross_validation_metrics(
         reais=reais_cv,
         predicoes=preds_cv,
@@ -234,7 +234,6 @@ def train_kfold():
         titulo=f"Validacao Cruzada - {MODELO_SELECIONADO.upper()}",
     )
 
-    print("\nAvaliando no conjunto de teste (ensemble dos folds)...")
     criterion_teste = nn.CrossEntropyLoss()
     prob_acumulada = None
     y_teste, mags_teste = None, None
@@ -258,7 +257,7 @@ def train_kfold():
         pasta_saida=f"resultados_teste_{MODELO_SELECIONADO}",
         titulo=f"Teste Held-out - {MODELO_SELECIONADO.upper()}",
     )
-    print("Pipeline finalizado com sucesso!")
+    
 
 
 if __name__ == "__main__":

@@ -1,22 +1,38 @@
 ##################################################
- RELATÓRIO COMPLETO DE VALIDAÇÃO CRUZADA - PASTA: resultados_kfold_resnet50
+ RELATORIO - Validacao Cruzada - RESNET50 - PASTA: resultados_kfold_resnet50
 ##################################################
 
-Acurácia Geral:   0.8759
-Sensibilidade (Recall): 0.9506
-Especificidade:         0.7125
-F1-Score (Macro):       0.8479
+Acuracia Geral:   0.8011
+Sensibilidade (Recall Maligno): 0.8596
+Especificidade (Recall Benigno): 0.6593
+F1-Score (Macro):       0.7595
+AUC-ROC:                0.8183
 
-MATRIZ DE CONFUSÃO:
-[[1502  606]
- [ 228 4386]]
+METRICAS POR FOLD (media +/- desvio):
+        Acuracia: 0.8019 +/- 0.0536
+   Sensibilidade: 0.8629 +/- 0.0388
+  Especificidade: 0.7319 +/- 0.1477
+              F1: 0.7301 +/- 0.0534
+             Auc: 0.8579 +/- 0.0771
 
-RELATÓRIO DETALHADO POR CLASSE:
+MATRIZ DE CONFUSAO:
+[[1258  650]
+ [ 649 3975]]
+
+RELATORIO DETALHADO POR CLASSE:
               precision    recall  f1-score   support
 
-     Benigno       0.87      0.71      0.78      2108
-     Maligno       0.88      0.95      0.91      4614
+     Benigno       0.66      0.66      0.66      1908
+     Maligno       0.86      0.86      0.86      4624
 
-    accuracy                           0.88      6722
-   macro avg       0.87      0.83      0.85      6722
-weighted avg       0.88      0.88      0.87      6722
+    accuracy                           0.80      6532
+   macro avg       0.76      0.76      0.76      6532
+weighted avg       0.80      0.80      0.80      6532
+
+
+ANALISE POR MAGNIFICACAO:
+   Mag       N   Acuracia    Sensib   Especif
+    40    1648     0.7937    0.8475    0.6603
+   100    1709     0.7847    0.8251    0.6861
+   200    1665     0.8102    0.8614    0.6846
+   400    1510     0.8179    0.9109    0.6022
